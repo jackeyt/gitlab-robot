@@ -65,8 +65,22 @@ class WebhookService extends Service {
     if (!res) return false
 
     return {
-      msgtype: 'markdown',
-      markdown: { content: content.join(' \n  ') },
+      msg_type: 'interactive',
+      card: {
+        schema: '2.0',
+        body: {
+          direction: 'vertical',
+          elements: [
+            {
+              tag: 'markdown',
+              content: content.length ? content.join(' \n  ') : '（暂无内容）',
+            },
+          ],
+        },
+        header: {
+          title: { tag: 'plain_text', content: '代码更新提醒' },
+        },
+      },
     };
   }
 
