@@ -14,6 +14,7 @@ const OBJECT_KIND = {
   wiki_page: 'wiki_page', // todo
   pipeline: 'pipeline',
   build: 'build',
+  release: 'release', // <- 新增
 }
 
 const REDIS_KEY = {
@@ -53,13 +54,16 @@ class WebhookService extends Service {
         res = await this.assemblePipelineMsg(content, data)
         break;
 
-
       case OBJECT_KIND.merge_request:
         res = await this.assembleMergeMsg(content, data)
         break;
 
       case OBJECT_KIND.tag_push:
         res = await this.assembleTagPushMsq(content, data)
+        break;
+
+      case OBJECT_KIND.release: // <- 新增
+        res = await this.assembleReleaseMsg(content, data)
         break;
     }
     if (!res) return false
@@ -192,7 +196,7 @@ class WebhookService extends Service {
     content.push('**MR详情：**\n')
 
     updated_at && content.push(this.generateListItem('提交时间', moment(updated_at).format('MM-DD HH:mm')))
-    description && content.push(this.generateListItem('合并详情', description))
+    description && content.push(this.generateListItem('合并详情', '\n' + description))
     !_.isEmpty(commit) && content.push(this.generateListItem('提交详情', `\n${commit.author.name}: [${S(commit.message).collapseWhitespace()}](${commit.url})`));
 
     return content
@@ -219,6 +223,77 @@ class WebhookService extends Service {
     total_commits_count && content.push(`**共提交${total_commits_count}次：**\n`)
     total_commits_count && content.push(this.generateListItem('', this.formatCommits(commits).text));
     return content
+  }
+
+  async assembleReleaseMsg(content, data) {
+    // 兼容两种结构：旧(data.release) 与 你示例的扁平结构(顶层字段)
+    const payload = data.release || data || {};
+    const {
+      tag,
+      tag_name,
+      name: releaseName,
+      description,
+      url: innerReleaseUrl,
+      released_at,
+      assets = {},
+      commit: releaseCommit
+    } = payload;
+
+    const action = data.action || payload.action;
+    const project = data.project || payload.project || {};
+    const { name: projName, web_url, path_with_namespace } = project;
+
+    // user 可能不存在，兜底 commit.author
+    const user = data.user || payload.user;
+    const userName =
+      (user && (user.name || user.username))
+      || (releaseCommit && releaseCommit.author && releaseCommit.author.name)
+      || '未知用户';
+
+    // 统一 tag
+    const finalTag = tag || tag_name;
+    // 多级 URL 兜底：结构内 url -> 顶层 url -> 拼接
+    const finalUrl = innerReleaseUrl
+      || data.url
+      || (web_url && finalTag ? `${web_url}/-/releases/${finalTag}` : '');
+
+    // action 显示
+    let actionStr;
+    switch (action) {
+      case 'create': actionStr = '发布了'; break;
+      case 'update': actionStr = '更新了'; break;
+      case 'delete': actionStr = '删除了'; break;
+      default: actionStr = `执行(${action || '未知'})了`;
+    }
+
+    content.push(`\`${userName}\`${actionStr}版本[[${releaseName || finalTag || '未命名版本'}](${finalUrl || web_url || '#'})]。`);
+    content.push(`> 项目 [[${projName || '未知项目'} | ${path_with_namespace || ''}](${web_url || '#'})]\n`);
+    content.push('**发布详情：**\n');
+
+    finalTag && content.push(this.generateListItem('标签', `\`${finalTag}\``));
+    released_at && content.push(this.generateListItem('发布时间', moment(released_at).format('MM-DD HH:mm')));
+
+    // 资产链接
+    if (assets.links && assets.links.length) {
+      const linksText = assets.links.map(l => `[${l.name}](${l.url})`).join(' / ');
+      content.push(this.generateListItem('\n **下载链接 **', linksText));
+    }
+
+    description && content.push(this.generateListItem('\n **版本变更细节**', '\n' + description));
+
+    if (releaseCommit && releaseCommit.author && releaseCommit.url) {
+      content.push(this.generateListItem(
+        '提交详情',
+        `\n${releaseCommit.author.name}: [${S(releaseCommit.message).collapseWhitespace()}](${releaseCommit.url})`
+      ));
+    }
+
+    // if (assets.sources && assets.sources.length) {
+    //   const sourcesText = assets.sources.map(s => `[${s.format}](${s.url})`).join(' / ');
+    //   content.push(this.generateListItem('源代码包', sourcesText));
+    // }
+
+    return content;
   }
 
   formatDuration(duration) {
