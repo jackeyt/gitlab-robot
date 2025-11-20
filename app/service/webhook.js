@@ -276,7 +276,7 @@ class WebhookService extends Service {
     // 资产链接
     if (assets.links && assets.links.length) {
       const linksText = assets.links.map(l => `[${l.name}](${l.url})`).join(' / ');
-      content.push(this.generateListItem('\n **下载链接 **', linksText));
+      content.push(this.generateListItem('\n' + '**下载链接**',  linksText));
     }
 
     description && content.push(this.generateListItem('\n **版本变更细节**', '\n' + description));
